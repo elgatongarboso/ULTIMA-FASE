@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mini-game</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #f0f0f0;
+        }
+        #gameCanvas {
+            border: 1px solid black;
+        }
+        #nextPhaseButton {
+            display: none;
+            position: absolute;
+            top: 63%;
+            left: 51%;
+            transform: translate(-50%, -50%);
+            padding: 10px 20px;
+            font-size: 24px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        #nextPhaseButton:hover {
+            background-color: #45a049;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+    <button id="nextPhaseButton">Próxima Fase</button>
+ 
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        let playerLives = 5;
+        let score = 0;
+        let gameOver = false;
+        let projectileSpeed = 2;
+        let lastProjectileTime = 0;
+        let movePlayer = false;
+        let targetX = 50, targetY = canvas.height / 2;
+        let isPlayerMovementDisabled = false;
+        let pointSpawnInterval;
+        let points = [];
+
+        const player = {
+            x: 50,
+            y: canvas.height / 2,
+            width: 80,
+            height: 80,
+            speed: 3,
+            image: new Image()
+        };
+       player.image.src = 'https://files.catbox.moe/ngnmhs.png';
+
+        const enemy = {
+            x: canvas.width - 100,
+            y: canvas.height / 2,
+            width: 80,
+            height: 80,
+            image: new Image()
+        };
+         enemy.image.src = 'https://files.catbox.moe/jy0uut.png';
+
+        const projectileImage = new Image();
+         projectileImage.src = 'https://files.catbox.moe/zln3va.png';
+
+        const pointImage = new Image();
+      pointImage.src = 'https://files.catbox.moe/uies26.png'; // Coloque o link da imagem desejada
+
+        // Áudios para cada evento
+        const audioUrls = {
+            inimigoCriaProjectile: "https://files.catbox.moe/j9af7i.wav",
+            projectileVaiDirecaoJogador: "",
+            jogadorDestroiProjectile: "https://files.catbox.moe/t7rf7t.wav",
+            audioPontoAparece: "https://files.catbox.moe/0df3r5.wav",
+            jogadorGanha: "https://files.catbox.moe/dgwns3.wav",
+            jogadorPerde: "https://files.catbox.moe/51i2vk.wav",
+            jogadorEncostaPonto: "https://files.catbox.moe/jrr422.wav",
+            projectileEncostaJogador: "https://files.catbox.moe/8bir2i.wav",
+            desativaMovimento: "",
+            ativaMovimento: "https://files.catbox.moe/zo5r5d.wav",
+            projetilrichocheteador: "https://files.catbox.moe/50vo2m.wav",
+            balaricochetebateunaparede: "https://files.catbox.moe/im9tt1.wav",
+            balaricocheteACERTOU: "https://files.catbox.moe/8bir2i.wav",
+            devourerCOmeuPonto: "https://files.catbox.moe/8r6208.mp3",
+            devorouOutroPeixe: "https://files.catbox.moe/esjfhl.mp3",
+			musicaFundo: "https://files.catbox.moe/si5ddp.wav" // Adicione o link da música de fundo aqui																			   
+        };
+
+       // Música de fundo
+        const backgroundMusic = new Audio(audioUrls.musicaFundo);
+        backgroundMusic.loop = true; // Faz a música tocar em loop
+        backgroundMusic.volume = 0.5; // Volume inicial
+        backgroundMusic.play();
+
+        function playSound(url) {
+            const audio = new Audio(url);
+            audio.play();
+        }
+
+        const projectiles = [];
+		
+		const bouncingBullets = [];
+
+		function spawnBouncingBullet() {
+			let bullet = {
+				x: enemy.x + enemy.width / 2,
+				y: enemy.y + enemy.height / 2,
+				width: 50,
+				height: 50,
+				vx: (Math.random() * 2 - 1) * 4, // Velocidade aleatória em X
+				vy: (Math.random() * 2 - 1) * 4, // Velocidade aleatória em Y
+				spawnTime: Date.now(),
+				ricocheted: false
+			};
+
+			bouncingBullets.push(bullet);
+
+			// Criar a bala padrão após 8 segundos
+			setTimeout(() => {
+				bouncingBullets.splice(bouncingBullets.indexOf(bullet), 1);
+				projectiles.push({
+					x: enemy.x,
+					y: enemy.y + enemy.height / 2,
+					speed: 1.5,
+					spawnTime: Date.now(),
+					randomDirX: Math.random() * 2 - 1,
+					randomDirY: Math.random() * 2 - 1,
+					randomSpeed: Math.random() * 1.5 + 0.5,
+					pauseTime: Math.random() * 4 + 1
+				});
+			}, 8000);
+		}
+
+		function moveBouncingBullets() {
+			bouncingBullets.forEach(bullet => {
+				bullet.x += bullet.vx;
+				bullet.y += bullet.vy;
+
+				// Verificar colisão com as paredes
+				if (bullet.x <= 0 || bullet.x + bullet.width >= canvas.width) {
+					bullet.vx = -bullet.vx, // Inverter direção ao atingir a parede
+				playSound(audioUrls.balaricochetebateunaparede);
+				}
+				if (bullet.y <= 0 || bullet.y + bullet.height >= canvas.height) {
+					bullet.vy = -bullet.vy,
+				playSound(audioUrls.balaricochetebateunaparede);
+				}
+
+				// Verificar colisão com o jogador
+				if (
+					bullet.x < player.x + player.width &&
+					bullet.x + bullet.width > player.x &&
+					bullet.y < player.y + player.height &&
+					bullet.y + bullet.height > player.y
+				) {
+					playerLives -= 2,
+					// RICOCHETE BATE NO JOGADOR
+					playSound(audioUrls.balaricocheteACERTOU);
+					bouncingBullets.splice(bouncingBullets.indexOf(bullet), 1); // Remove bala
+					if (playerLives <= 0) {
+						gameOver = true;
+						playSound(audioUrls.jogadorPerde);
+					}
+				}
+			});
+		}
+
+		function drawBouncingBullets() {
+			bouncingBullets.forEach(bullet => {
+				const bulletImage = new Image();
+			bulletImage.src = 'https://files.catbox.moe/k3mxu6.png'; // Link personalizável
+				ctx.drawImage(bulletImage, bullet.x, bullet.y, bullet.width, bullet.height);
+			});
+		}
+
+		// Gerar a bala ricocheteante aleatoriamente entre 5 a 10 segundos
+		setInterval(() => {
+			spawnBouncingBullet();
+			playSound(audioUrls.projetilrichocheteador);
+		}, Math.random() * 2000 + 4000);
+
+        function drawPlayer() {
+            ctx.drawImage(player.image, player.x, player.y, player.width, player.height);
+        }
+
+        function drawEnemy() {
+            ctx.drawImage(enemy.image, enemy.x, enemy.y, enemy.width, enemy.height);
+        }
+
+        function drawProjectiles() {
+            projectiles.forEach(projectile => {
+                ctx.drawImage(projectileImage, projectile.x, projectile.y, 50, 50);
+            });
+        }
+
+        function drawPoints() {
+            points.forEach(point => {
+                ctx.drawImage(pointImage, point.x, point.y, 80, 50);
+            });
+        }
+
+        function moveProjectiles() {
+            const currentTime = Date.now();
+            projectiles.forEach(projectile => {
+                const elapsedTime = (currentTime - projectile.spawnTime) / 1000;
+
+                if (elapsedTime >= 3 && elapsedTime < 7) {
+                    projectile.x += projectile.randomDirX * projectile.randomSpeed;
+                    projectile.y += projectile.randomDirY * projectile.randomSpeed;
+                } else if (elapsedTime >= 7 && elapsedTime < 7 + projectile.pauseTime) {
+                    // Pausa
+                } else if (elapsedTime >= 7 + projectile.pauseTime) {
+                    const dx = player.x + player.width / 2 - projectile.x;
+                    const dy = player.y + player.height / 2 - projectile.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+
+                    projectile.x += (dx / distance) * projectile.speed;
+                    projectile.y += (dy / distance) * projectile.speed;
+                }
+            });
+
+            projectiles.forEach((projectile, index) => {
+                if (projectile.x < 0 || projectile.x > canvas.width || projectile.y < 0 || projectile.y > canvas.height) {
+                    projectiles.splice(index, 1);
+                }
+            });
+        }
+
+        function movePlayerTowardsTarget() {
+            if (movePlayer && !isPlayerMovementDisabled) {
+                const dx = targetX - player.x;
+                const dy = targetY - player.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+
+                if (distance > player.speed) {
+                    player.x += (dx / distance) * player.speed;
+                    player.y += (dy / distance) * player.speed;
+                } else {
+                    movePlayer = false;
+                }
+            }
+        }
+
+        function checkCollision() {
+            projectiles.forEach((projectile, index) => {
+                if (
+                    projectile.x < player.x + player.width &&
+                    projectile.x + 20 > player.x &&
+                    projectile.y < player.y + player.height &&
+                    projectile.y + 20 > player.y
+                ) {
+                    projectiles.splice(index, 1);
+                    playerLives--;
+						// Áudio de encosta na bala inimiga
+                        playSound(audioUrls.projectileEncostaJogador);
+
+                    if (playerLives <= 0) {
+                        gameOver = true;
+						// Áudio de derrota
+                        playSound(audioUrls.jogadorPerde);
+						
+                    }
+                }
+				
+            });
+
+            points.forEach((point, index) => {
+                if (
+                    point.x < player.x + player.width &&
+                    point.x + 30 > player.x &&
+                    point.y < player.y + player.height &&
+                    point.y + 30 > player.y
+                ) {
+                    points.splice(index, 1);
+                    score += 10;
+                playSound(audioUrls.jogadorEncostaPonto);
+                }
+            });
+        }
+
+        function drawScore() {
+            ctx.font = '20px Arial';
+            ctx.fillStyle = 'black';
+            ctx.fillText(`Pontos: ${score}`, 10, 30);
+            ctx.fillText(`Vidas: ${playerLives}`, 10, 60);
+        }
+
+        function spawnProjectile() {
+            const currentTime = Date.now();
+            if (currentTime - lastProjectileTime > Math.random() * 4000 + 1000) {
+                projectiles.push({
+                    x: enemy.x,
+                    y: enemy.y + enemy.height / 2,
+                    speed: 1.5,
+                    spawnTime: currentTime,
+                    randomDirX: Math.random() * 2 - 1,
+                    randomDirY: Math.random() * 2 - 1,
+                    randomSpeed: Math.random() * 1.5 + 0.5,
+                    pauseTime: Math.random() * 4 + 1
+                });
+
+                // Áudio quando o inimigo cria um projectile
+                playSound(audioUrls.inimigoCriaProjectile);
+                lastProjectileTime = currentTime;
+            }
+        }
+
+        function spawnPoint() {
+            points.push({
+                x: Math.random() * (canvas.width - 30),
+                y: Math.random() * (canvas.height - 30)
+            });
+							// Áudio quando PONTO APARECE
+                playSound(audioUrls.audioPontoAparece);
+        }
+
+const devourers = [];
+const maxDevourers = 5; // Limite de devoradores ao mesmo tempo
+
+// Função para spawnar um Devorador
+function spawnDevourer() {
+    if (devourers.length < maxDevourers) { // Limitar o número de devoradores
+        let devourer = {
+            x: Math.random() * (canvas.width - 50),
+            y: Math.random() * (canvas.height - 50),
+            width: 90, // Tamanho inicial do devorador
+            height: 90,
+            speed: 1.2,
+            targetPoint: null, // Alvo do devorador (ponto)
+            isMoving: true,
+            stopTime: Math.random() * 3000 + 1000, // Parar por 1 a 4 segundos
+            image: new Image()
+        };
+        devourer.image.src = 'https://files.catbox.moe/ro892a.png'; // Link personalizável da imagem
+
+        devourers.push(devourer);
+
+        // Fazer o devorador parar e depois se mover aleatoriamente
+        setTimeout(() => {
+            devourer.isMoving = false;
+            setTimeout(() => {
+                devourer.isMoving = true;
+            }, devourer.stopTime);
+        }, devourer.stopTime);
+    }
+}
+
+// Função para mover o Devorador
+function moveDevourers() {
+    devourers.forEach((devourer, index) => {
+        if (devourer.isMoving) {
+            if (!devourer.targetPoint && points.length > 0) {
+                // Procurar o ponto mais próximo
+                devourer.targetPoint = points[0]; // Pegar o primeiro ponto como alvo
+            }
+
+            if (devourer.targetPoint) {
+                // Mover em direção ao ponto
+                const dx = devourer.targetPoint.x - devourer.x;
+                const dy = devourer.targetPoint.y - devourer.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+
+                if (distance > 5) { // Se estiver longe do ponto, mover-se
+                    devourer.x += (dx / distance) * devourer.speed;
+                    devourer.y += (dy / distance) * devourer.speed;
+                } else {
+                    // Se o devorador alcançou o ponto, comer o ponto
+                    points.splice(points.indexOf(devourer.targetPoint), 1); // Remove o ponto
+                    devourer.targetPoint = null, // Remover o alvo após comer o ponto
+				// Comeu ponto
+				playSound(audioUrls.devourerCOmeuPonto);
+                }
+            } else {
+                // Movimento aleatório se não houver alvo
+                devourer.x += (Math.random() * 2 - 1) * devourer.speed;
+                devourer.y += (Math.random() * 2 - 1) * devourer.speed;
+            }
+
+            // Limitar o devorador dentro dos limites do canvas
+            if (devourer.x <= 0 || devourer.x + devourer.width >= canvas.width) {
+                devourer.x = Math.max(0, Math.min(devourer.x, canvas.width - devourer.width));
+            }
+            if (devourer.y <= 0 || devourer.y + devourer.height >= canvas.height) {
+                devourer.y = Math.max(0, Math.min(devourer.y, canvas.height - devourer.height));
+            }
+        }
+
+        // Verificar colisão com jogador
+        if (
+            devourer.x < player.x + player.width &&
+            devourer.x + devourer.width > player.x &&
+            devourer.y < player.y + player.height &&
+            devourer.y + devourer.height > player.y
+        ) {
+            playerLives--; // Jogador perde 1 vida
+			playSound(audioUrls.devorouOutroPeixe);
+            devourers.splice(index, 1); // O devorador morre
+            if (playerLives <= 0) {
+                gameOver = true;
+                playSound(audioUrls.jogadorPerde);
+            }
+        }
+
+        // Verificar colisão entre devoradores
+        devourers.forEach((otherDevourer, otherIndex) => {
+            if (index !== otherIndex) {
+                if (
+                    devourer.x < otherDevourer.x + otherDevourer.width &&
+                    devourer.x + devourer.width > otherDevourer.x &&
+                    devourer.y < otherDevourer.y + otherDevourer.height &&
+                    devourer.y + devourer.height > otherDevourer.y
+                ) {
+                    // Fundir os dois devoradores
+                    devourers.splice(otherIndex, 1); // Remove o segundo devorador
+                    devourer.width += 10; // Aumenta o tamanho do devorador
+                    devourer.height += 10;
+					playSound(audioUrls.devorouOutroPeixe);
+                }
+            }
+        });
+    });
+}
+
+// Função para desenhar o Devorador
+function drawDevourers() {
+    devourers.forEach(devourer => {
+        ctx.drawImage(devourer.image, devourer.x, devourer.y, devourer.width, devourer.height);
+    });
+}
+
+// Limitar o número de devoradores e controlar o spawn
+setInterval(() => {
+    spawnDevourer();
+}, Math.random() * 9000 + 1000); // Entre 1 e 10 segundos
+
+
+        function gameLoop() {
+            if (!gameOver) {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                drawPlayer();
+                drawEnemy();
+                drawProjectiles();
+                drawPoints();
+                moveProjectiles();
+                movePlayerTowardsTarget();
+                checkCollision();
+                drawScore();
+                spawnProjectile();
+
+				drawBouncingBullets();  // Desenhar as balas ricocheteantes
+				moveBouncingBullets();  // Mover as balas ricocheteantes
+
+
+				// === ADICIONAR AS NOVAS CHAMADAS AQUI ===
+				drawDevourers();  // Desenhar os devoradores
+				moveDevourers();  // Mover os devoradores
+
+                if (score >= 100) {
+                    gameOver = true;
+                    ctx.font = '40px Arial';
+                    ctx.fillStyle = 'green';
+                    ctx.fillText('Você venceu!', canvas.width / 2 - 100, canvas.height / 2);
+
+						// Áudio de vitoria
+                        playSound(audioUrls.jogadorGanha);
+
+                    // Exibir botão de "Próxima Fase"
+                    nextPhaseButton.style.display = 'block';
+                    nextPhaseButton.addEventListener('click', () => {
+                        window.location.href = 'https://elgatongarboso.github.io/FIM/'; // Mudar para o link desejado
+                    });
+                }
+
+                requestAnimationFrame(gameLoop);
+            } else if (playerLives <= 0) {
+                ctx.font = '40px Arial';
+                ctx.fillStyle = 'red';
+                ctx.fillText('Game Over', canvas.width / 2 - 100, canvas.height / 2);
+            }
+        }
+
+        canvas.addEventListener('click', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const clickX = e.clientX - rect.left;
+            const clickY = e.clientY - rect.top;
+
+           // Inicia a música quando o canvas é clicado
+            if (backgroundMusic.paused) {
+                backgroundMusic.play();
+            }
+            if (
+                clickX > player.x &&
+                clickX < player.x + player.width &&
+                clickY > player.y &&
+                clickY < player.y + player.height
+            ) {
+                isPlayerMovementDisabled = !isPlayerMovementDisabled;
+                if (isPlayerMovementDisabled) {
+                    // Áudio quando o movimento do jogador é desativado
+					playSound(audioUrls.ativaMovimento);
+                } else {
+                    // Áudio quando o movimento do jogador é ativado
+					playSound(audioUrls.ativaMovimento);
+                }
+            } else if (!isPlayerMovementDisabled) {
+                targetX = clickX - player.width / 2;
+                targetY = clickY - player.height / 2;
+                movePlayer = true;
+
+            }
+
+            projectiles.forEach((projectile, index) => {
+                if (
+                    clickX > projectile.x &&
+                    clickX < projectile.x + 50 &&
+                    clickY > projectile.y &&
+                    clickY < projectile.y + 50
+                ) {
+                    projectiles.splice(index, 1);
+                    score++;
+					// clica na bala inimiga
+					playSound(audioUrls.jogadorDestroiProjectile);
+                }
+            });
+        });
+
+        setInterval(() => {
+            projectileSpeed += 0.5;
+        }, 10000);
+
+        pointSpawnInterval = setInterval(() => {
+            spawnPoint();
+        }, Math.random() * 5000 + 10000); // Spawna pontos entre 10 e 15 segundos
+
+        gameLoop();
+
+
+
+    </script>
+</body>
+</html>
